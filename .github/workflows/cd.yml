@@ -21,6 +21,8 @@ jobs:
         run: |
           sed -e "s|ghcr.io/skinner84/cicd_learning:latest|${IMAGE}|g" k8s/deployment.yaml | kubectl apply -f -
           kubectl apply -f k8s/service.yaml -n "${NAMESPACE}"
+      - name: Restart to pull latest
+        run: kubectl -n "${NAMESPACE}" rollout restart deploy/${APP_NAME}
       - name: Wait for rollout
         run: kubectl -n "${NAMESPACE}" rollout status deploy/${APP_NAME} --timeout=90s
       - name: Health check (/health)
