@@ -1,6 +1,9 @@
 name: CD - Deploy (self-hosted k3d)
 on:
   workflow_dispatch: {}
+  workflow_run:
+    workflows: ["CI - Build, Scan, Push (GHCR)"]
+    types: [completed]
 permissions:
   contents: read
 env:
@@ -9,6 +12,12 @@ env:
   IMAGE_NAME: cicd_learning
 jobs:
   deploy:
+    # Run when manually triggered OR after CI success on main
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: [self-hosted, k3d]
     steps:
       - name: Checkout
