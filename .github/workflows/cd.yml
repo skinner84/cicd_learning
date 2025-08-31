@@ -1,14 +1,35 @@
-name: CD - Deploy to k3s (placeholder)
+name: CD - Deploy (self-hosted k3d)
 on:
   workflow_dispatch: {}
 permissions:
   contents: read
+env:
+  NAMESPACE: default
+  APP_NAME: cicd-learning
+  IMAGE_NAME: cicd_learning
 jobs:
-  placeholder:
-    runs-on: ubuntu-latest
+  deploy:
+    runs-on: [self-hosted, k3d]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Placeholder
-        run: echo "Milestone 2 will implement deploy/verify."
-
+      - name: Set image reference
+        run: |
+          OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE=ghcr.io/${OWNER_LC}/${IMAGE_NAME}:latest" >> $GITHUB_ENV
+      - name: Apply manifests
+        run: |
+          sed -e "s|ghcr.io/skinner84/cicd_learning:latest|${IMAGE}|g" k8s/deployment.yaml | kubectl apply -f -
+          kubectl apply -f k8s/service.yaml -n "${NAMESPACE}"
+      - name: Wait for rollout
+        run: kubectl -n "${NAMESPACE}" rollout status deploy/${APP_NAME} --timeout=90s
+      - name: Health check (/health)
+        run: |
+          kubectl -n "${NAMESPACE}" port-forward deploy/${APP_NAME} 18080:8080 >pf.log 2>&1 &
+          PF_PID=$!
+          for i in {1..30}; do
+            if curl -fsS http://localhost:18080/health | grep -q '"status":"ok"'; then echo OK; break; fi
+            sleep 1
+          done
+          curl -fsS http://localhost:18080/health | tee /dev/stderr | grep -q '"status":"ok"'
+          kill $PF_PID || true
