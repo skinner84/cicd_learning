@@ -1,0 +1,10 @@
+# Records chosen settings for this repo. Update then commit.
+project_name: "cicd_learning"
+registry_provider: "ghcr"               # dockerhub|ecr|ghcr
+dockerhub_repo: ""
+aws_account_id: "503155151722"
+aws_region: "ap-southeast-2"
+k8s_namespace: "default"
+kubeconfig_method: "kubeconfig_secret"  # kubeconfig_secret|ssm_exec
+app_port: 8080
+severity_threshold: "HIGH,CRITICAL"

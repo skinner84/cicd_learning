@@ -1,0 +1,75 @@
+name: CI - Build, Scan, Push (GHCR)
+
+on:
+  push:
+    branches: ["**"]
+
+permissions:
+  contents: read
+  packages: write  # push to GHCR with GITHUB_TOKEN
+
+env:
+  IMAGE_NAME: cicd_learning
+  SEVERITY_THRESHOLD: HIGH,CRITICAL
+
+jobs:
+  build-scan-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute image metadata
+        run: |
+          echo "SHA_SHORT=${GITHUB_SHA::7}" >> $GITHUB_ENV
+          SANITIZED_REF=${GITHUB_REF_NAME//\//-}
+          echo "BRANCH_NAME=$SANITIZED_REF" >> $GITHUB_ENV
+          OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_REPO=ghcr.io/${OWNER_LC}/${IMAGE_NAME}" >> $GITHUB_ENV
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build container image
+        if: hashFiles('Dockerfile') != ''
+        run: |
+          set -euo pipefail
+          echo "Building $IMAGE_REPO:${BRANCH_NAME}-${SHA_SHORT}"
+          docker build -t "$IMAGE_REPO:${BRANCH_NAME}-${SHA_SHORT}" .
+          if [ "$GITHUB_REF_NAME" = "main" ]; then
+            docker tag "$IMAGE_REPO:${BRANCH_NAME}-${SHA_SHORT}" "$IMAGE_REPO:latest"
+          fi
+
+      - name: Smoke test /health
+        if: hashFiles('Dockerfile') != ''
+        run: |
+          set -euo pipefail
+          cid=$(docker run -d -p 8080:8080 "$IMAGE_REPO:${BRANCH_NAME}-${SHA_SHORT}")
+          for i in {1..20}; do
+            if curl -fsS http://localhost:8080/health | grep -q '"status":"ok"'; then
+              echo "Health check passed"; break; fi; sleep 1; done
+          curl -fsS http://localhost:8080/health | tee /dev/stderr | grep -q '"status":"ok"'
+          docker rm -f "$cid"
+
+      - name: Trivy scan (fail on ${{ env.SEVERITY_THRESHOLD }})
+        if: hashFiles('Dockerfile') != ''
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: ${{ env.IMAGE_REPO }}:${{ env.BRANCH_NAME }}-${{ env.SHA_SHORT }}
+          severity: ${{ env.SEVERITY_THRESHOLD }}
+          ignore-unfixed: true
+          format: 'table'
+          exit-code: '1'
+
+      - name: Push image to GHCR
+        if: hashFiles('Dockerfile') != ''
+        run: |
+          set -euo pipefail
+          docker push "$IMAGE_REPO:${BRANCH_NAME}-${SHA_SHORT}"
+          if [ "$GITHUB_REF_NAME" = "main" ]; then
+            docker push "$IMAGE_REPO:latest"
+          fi
